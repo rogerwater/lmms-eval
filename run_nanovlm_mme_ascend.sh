@@ -3,7 +3,7 @@ set -euo pipefail
 
 PYTHON_BIN="${PYTHON_BIN:-python}"
 VISIBLE_DEVICES="${VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
-WORKER_GPUS="${WORKER_GPUS:-0,1,2,3,4,5,6,7}"
+WORKER_COUNT="${WORKER_COUNT:-8}"
 MODEL_PATH="${MODEL_PATH:-/home/ma-user/work/output/nanovlm_stage2_ascend/checkpoint-11540-merged}"
 TASKS="${TASKS:-mme}"
 LIMIT="${LIMIT:-}"
@@ -25,7 +25,7 @@ mkdir -p "${OUTPUT_PATH}"
 
 EVAL_ARGS=(
   --model nanovlm
-  --model_args "pretrained=${MODEL_PATH},device=npu,worker_gpus=${WORKER_GPUS},attn_implementation=${ATTN_IMPLEMENTATION},use_cache=${USE_CACHE}"
+  --model_args "pretrained=${MODEL_PATH},device=npu,worker_count=${WORKER_COUNT},attn_implementation=${ATTN_IMPLEMENTATION},use_cache=${USE_CACHE}"
   --tasks "${TASKS}"
   --batch_size "${BATCH_SIZE}"
   --log_samples
@@ -38,14 +38,14 @@ if [[ -n "${LIMIT}" ]]; then
 fi
 
 echo "============================================================"
-echo "NanoVLM Ascend 8-NPU MME eval"
+echo "NanoVLM Ascend MME eval"
 echo "============================================================"
 echo "MODEL_PATH: ${MODEL_PATH}"
 echo "TASKS: ${TASKS}"
 echo "LIMIT: ${LIMIT:-<full>}"
 echo "BATCH_SIZE: ${BATCH_SIZE}"
 echo "ASCEND_RT_VISIBLE_DEVICES: ${ASCEND_RT_VISIBLE_DEVICES}"
-echo "WORKER_GPUS: ${WORKER_GPUS}"
+echo "WORKER_COUNT: ${WORKER_COUNT}"
 echo "HF_HOME: ${HF_HOME}"
 if [[ -n "${HF_ENDPOINT:-}" ]]; then
   echo "HF_ENDPOINT: ${HF_ENDPOINT}"
@@ -68,11 +68,11 @@ if not model_path.exists():
     raise SystemExit(f"MODEL_PATH does not exist: {model_path}")
 
 visible_devices = [item for item in "${ASCEND_RT_VISIBLE_DEVICES}".split(",") if item]
-worker_gpus = [item for item in "${WORKER_GPUS}".split(",") if item]
-if len(worker_gpus) != 8:
-    print(f"warning: WORKER_GPUS has {len(worker_gpus)} entries, expected 8 for full 8-NPU eval.")
-if len(visible_devices) < len(worker_gpus):
-    print(f"warning: visible device count {len(visible_devices)} is smaller than worker count {len(worker_gpus)}.")
+worker_count = int("${WORKER_COUNT}")
+if worker_count != 8:
+    print(f"warning: WORKER_COUNT is {worker_count}, expected 8 for full 8-NPU eval.")
+if len(visible_devices) < worker_count:
+    print(f"warning: visible device count {len(visible_devices)} is smaller than WORKER_COUNT {worker_count}.")
 
 print("torch:", torch.__version__)
 print("torch_npu:", getattr(torch_npu, "__version__", "unknown"))
@@ -86,6 +86,6 @@ PY
 "${PYTHON_BIN}" -m lmms_eval "${EVAL_ARGS[@]}"
 
 echo "============================================================"
-echo "NanoVLM 8-NPU eval completed."
+echo "NanoVLM Ascend MME eval completed."
 echo "Outputs saved to: ${OUTPUT_PATH}"
 echo "============================================================"
