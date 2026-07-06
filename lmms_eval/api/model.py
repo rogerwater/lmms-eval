@@ -158,7 +158,10 @@ class lmms(abc.ABC):
             if isinstance(attr_value, nn.Module):
                 delattr(self, attr_name)
         gc.collect()
-        torch.cuda.empty_cache()
+        if hasattr(torch, "npu") and torch.npu.is_available():
+            torch.npu.empty_cache()
+        elif torch.cuda.is_available():
+            torch.cuda.empty_cache()
 
 
 class CacheHook:

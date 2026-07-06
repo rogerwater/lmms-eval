@@ -1032,7 +1032,10 @@ def pad_and_concat(
 
 def clear_torch_cache() -> None:
     gc.collect()
-    torch.cuda.empty_cache()
+    if hasattr(torch, "npu") and torch.npu.is_available():
+        torch.npu.empty_cache()
+    elif torch.cuda.is_available():
+        torch.cuda.empty_cache()
 
 
 def get_dtype(dtype: Union[str, torch.dtype]) -> torch.dtype:

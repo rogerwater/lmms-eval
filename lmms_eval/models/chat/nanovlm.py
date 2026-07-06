@@ -9,6 +9,7 @@ Single-GPU fallback is automatic when only one device is visible.
 Use ``worker_gpus`` or ``worker_count`` model_args to control GPU selection.
 """
 
+import importlib.util
 import os
 import queue
 import threading
@@ -30,6 +31,36 @@ from lmms_eval.api.registry import register_model
 from lmms_eval.protocol import ChatMessages
 
 
+def _npu_available() -> bool:
+    if importlib.util.find_spec("torch_npu") is None:
+        return False
+    import torch_npu  # noqa: F401
+
+    return hasattr(torch, "npu") and torch.npu.is_available()
+
+
+def _device_count(device_type: str) -> int:
+    if device_type == "npu":
+        return torch.npu.device_count()
+    if device_type == "cuda":
+        return torch.cuda.device_count()
+    return 0
+
+
+def _set_device(device: torch.device) -> None:
+    if device.type == "npu":
+        torch.npu.set_device(device)
+    elif device.type == "cuda":
+        torch.cuda.set_device(device)
+
+
+def _from_pretrained_with_mistral_regex_fix(auto_cls, pretrained: str, **kwargs):
+    try:
+        return auto_cls.from_pretrained(pretrained, fix_mistral_regex=True, **kwargs)
+    except TypeError:
+        return auto_cls.from_pretrained(pretrained, **kwargs)
+
+
 @dataclass
 class _NanoVLMWorker:
     model: AutoModelForImageTextToText
@@ -47,7 +78,7 @@ class NanoVLM(lmms):
     def __init__(
         self,
         pretrained: str = "LMMs-Lab-Speedrun/NanoVLM_Init",
-        device: Optional[str] = "cuda",
+        device: Optional[str] = None,
         batch_size: Optional[Union[int, str]] = 1,
         attn_implementation: Optional[str] = None,
         system_prompt: Optional[str] = "You are a helpful assistant.",
@@ -90,35 +121,70 @@ class NanoVLM(lmms):
     def _resolve_worker_devices(self, device: Optional[str], worker_gpus: Optional[str], worker_count: Optional[int]) -> List[str]:
         if device == "cpu":
             return ["cpu"]
+
+        if device is None:
+            device = "npu" if _npu_available() else "cuda"
+
+        if device.startswith("npu"):
+            device_type = "npu"
+        elif device.startswith("cuda"):
+            device_type = "cuda"
+        else:
+            device_type = "npu" if _npu_available() else "cuda"
+
         if worker_gpus:
             selected = [gpu.strip() for gpu in worker_gpus.split(",") if gpu.strip()]
-            return [f"cuda:{gpu}" if not gpu.startswith("cuda:") else gpu for gpu in selected]
-        if not torch.cuda.is_available():
+            return [gpu if gpu.startswith(f"{device_type}:") else f"{device_type}:{gpu}" for gpu in selected]
+
+        if device in {"npu", "cuda"}:
+            if device_type == "npu" and not _npu_available():
+                return ["cpu"]
+            if device_type == "cuda" and not torch.cuda.is_available():
+                return ["cpu"]
+            available = [f"{device_type}:{i}" for i in range(_device_count(device_type))]
+            if worker_count is None:
+                return available
+            return available[: min(worker_count, len(available))]
+
+        if device_type == "npu" and not _npu_available():
             return ["cpu"]
-        available = [f"cuda:{i}" for i in range(torch.cuda.device_count())]
-        if worker_count is None:
-            return available
-        return available[: min(worker_count, len(available))]
+        if device_type == "cuda" and not torch.cuda.is_available():
+            return ["cpu"]
+        return [device]
 
     def _load_worker(self, device_name: str) -> _NanoVLMWorker:
-        model_kwargs: Dict[str, object] = {"torch_dtype": torch.bfloat16, "device_map": device_name}
+        model_kwargs: Dict[str, object] = {"torch_dtype": torch.bfloat16}
         if self._attn_implementation:
             model_kwargs["attn_implementation"] = self._attn_implementation
 
         eval_logger.info(f"Loading NanoVLM worker on {device_name}")
-        model = AutoModelForImageTextToText.from_pretrained(self.pretrained, **model_kwargs).eval()
-        tokenizer = AutoTokenizer.from_pretrained(self.pretrained)
-        image_processor = AutoImageProcessor.from_pretrained(self.pretrained)
+        device = torch.device(device_name)
+        if device.type == "cuda":
+            model_kwargs["device_map"] = device_name
+            model = AutoModelForImageTextToText.from_pretrained(self.pretrained, **model_kwargs).eval()
+        elif device.type == "npu":
+            _set_device(device)
+            model = AutoModelForImageTextToText.from_pretrained(self.pretrained, **model_kwargs).to(device).eval()
+        else:
+            model = AutoModelForImageTextToText.from_pretrained(self.pretrained, **model_kwargs).eval()
+
+        tokenizer = _from_pretrained_with_mistral_regex_fix(AutoTokenizer, self.pretrained)
+        image_processor = _from_pretrained_with_mistral_regex_fix(AutoImageProcessor, self.pretrained)
 
         config = model.config
         image_token_count = getattr(config, "image_token_count", 256)
-        image_token_id = getattr(config, "image_token_id", tokenizer.convert_tokens_to_ids("<|image_pad|>"))
+        tokenizer_image_token_id = tokenizer.convert_tokens_to_ids("<|image_pad|>")
+        image_token_id = getattr(config, "image_token_id", tokenizer_image_token_id)
+        if tokenizer_image_token_id is not None and tokenizer_image_token_id >= 0 and image_token_id != tokenizer_image_token_id:
+            eval_logger.warning(f"Sync NanoVLM image_token_id: config={image_token_id}, tokenizer={tokenizer_image_token_id}")
+            image_token_id = tokenizer_image_token_id
+            config.image_token_id = tokenizer_image_token_id
 
         return _NanoVLMWorker(
             model=model,
             tokenizer=tokenizer,
             image_processor=image_processor,
-            device=torch.device(device_name),
+            device=device,
             image_token_count=image_token_count,
             image_token_id=image_token_id,
         )
@@ -137,9 +203,57 @@ class NanoVLM(lmms):
                 expanded.append(token_id)
         return expanded
 
+    def _render_visual_content_for_template(self, message: dict) -> dict:
+        content = message.get("content", "")
+        if not isinstance(content, list):
+            return message
+
+        image_token = "<|image_pad|>"
+        video_token = "<|video_pad|>"
+        explicit_image_tokens = 0
+        explicit_video_tokens = 0
+        for item in content:
+            if isinstance(item, dict):
+                text = item.get("text", "")
+            else:
+                text = str(item)
+            if isinstance(text, str):
+                explicit_image_tokens += text.count(image_token)
+                explicit_video_tokens += text.count(video_token)
+
+        rendered = []
+        for item in content:
+            if not isinstance(item, dict):
+                rendered.append(str(item))
+                continue
+
+            item_type = item.get("type")
+            if item_type == "image":
+                if explicit_image_tokens > 0:
+                    explicit_image_tokens -= 1
+                else:
+                    rendered.append(image_token)
+            elif item_type == "video":
+                if explicit_video_tokens > 0:
+                    explicit_video_tokens -= 1
+                else:
+                    rendered.append(video_token)
+            elif item_type == "text":
+                rendered.append(item.get("text", ""))
+            elif "text" in item:
+                rendered.append(item.get("text", ""))
+
+        return {
+            **message,
+            "content": "\n".join(part for part in rendered if part),
+        }
+
     def _process_single(self, worker: _NanoVLMWorker, hf_messages: List[dict], images: List) -> Tuple[torch.Tensor, dict]:
         """Tokenize with chat template, expand image tokens, and process images."""
+        hf_messages = [self._render_visual_content_for_template(message) for message in hf_messages]
         token_ids = worker.tokenizer.apply_chat_template(hf_messages, tokenize=True, add_generation_prompt=True)
+        if isinstance(token_ids, list) and token_ids and isinstance(token_ids[0], list):
+            token_ids = token_ids[0]
         token_ids = self._expand_image_tokens(token_ids, worker.image_token_id, worker.image_token_count)
         input_ids = torch.tensor([token_ids], dtype=torch.long)
 
@@ -230,6 +344,7 @@ class NanoVLM(lmms):
 
         def worker_loop(worker: _NanoVLMWorker) -> None:
             nonlocal total_elapsed, total_tokens
+            _set_device(worker.device)
             while True:
                 if errors:
                     return
