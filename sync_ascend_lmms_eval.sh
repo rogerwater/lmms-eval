@@ -6,15 +6,26 @@ set -euo pipefail
 # This script intentionally does NOT install torch, torchvision, flash-attn,
 # triton, bitsandbytes, liger-kernel, or any nvidia-* CUDA wheels.
 
-PIP_INDEX_URL="${PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
-PIP_TRUSTED_HOST="${PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
+# Use script-specific variables so ModelArts/global PIP_INDEX_URL does not
+# silently override the intended mirror.
+ASCEND_PIP_INDEX_URL="${ASCEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
+ASCEND_PIP_TRUSTED_HOST="${ASCEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
 INSTALL_VIDEO_DEPS="${INSTALL_VIDEO_DEPS:-0}"
 
-PIP_COMMON_ARGS=(
-  --index-url "${PIP_INDEX_URL}"
-  --trusted-host "${PIP_TRUSTED_HOST}"
+PIP_GLOBAL_ARGS=(
+  --isolated
 )
+
+PIP_INSTALL_ARGS=(
+  --index-url "${ASCEND_PIP_INDEX_URL}"
+  --trusted-host "${ASCEND_PIP_TRUSTED_HOST}"
+  --prefer-binary
+)
+
+echo "Using pip index: ${ASCEND_PIP_INDEX_URL}"
+echo "Using pip trusted host: ${ASCEND_PIP_TRUSTED_HOST}"
+echo "pip will run with --isolated to ignore environment/global pip config."
 
 echo "============================================================"
 echo "[1/5] Checking bundled Ascend PyTorch and lmms-engine"
@@ -55,15 +66,15 @@ PY
 echo "============================================================"
 echo "[2/5] Upgrading pip tooling with Aliyun mirror"
 echo "============================================================"
-"${PYTHON_BIN}" -m pip install \
-  "${PIP_COMMON_ARGS[@]}" \
+"${PYTHON_BIN}" -m pip "${PIP_GLOBAL_ARGS[@]}" install \
+  "${PIP_INSTALL_ARGS[@]}" \
   --upgrade pip setuptools wheel
 
 echo "============================================================"
 echo "[3/5] Installing lmms-eval runtime dependencies"
 echo "============================================================"
-"${PYTHON_BIN}" -m pip install \
-  "${PIP_COMMON_ARGS[@]}" \
+"${PYTHON_BIN}" -m pip "${PIP_GLOBAL_ARGS[@]}" install \
+  "${PIP_INSTALL_ARGS[@]}" \
   "evaluate>=0.4.0" \
   "httpx>=0.23.3" \
   "aiohttp" \
@@ -103,8 +114,8 @@ echo "[3.5/5] Optional video dependencies"
 echo "============================================================"
 if [[ "${INSTALL_VIDEO_DEPS}" == "1" ]]; then
   echo "Installing decord for video tasks. Skip this for image-only MME evals."
-  "${PYTHON_BIN}" -m pip install \
-    "${PIP_COMMON_ARGS[@]}" \
+  "${PYTHON_BIN}" -m pip "${PIP_GLOBAL_ARGS[@]}" install \
+    "${PIP_INSTALL_ARGS[@]}" \
     "decord" \
     "qwen-vl-utils>=0.0.14"
 else
@@ -114,8 +125,8 @@ fi
 echo "============================================================"
 echo "[4/5] Installing lmms-eval in editable mode without deps"
 echo "============================================================"
-"${PYTHON_BIN}" -m pip install \
-  "${PIP_COMMON_ARGS[@]}" \
+"${PYTHON_BIN}" -m pip "${PIP_GLOBAL_ARGS[@]}" install \
+  "${PIP_INSTALL_ARGS[@]}" \
   --no-deps \
   -e .
 
