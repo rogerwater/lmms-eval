@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Eight-NPU NanoVLM MME eval for Ascend/snt9b.
-# Run from the lmms-eval repository root after the single-NPU smoke test passes.
-# Do not launch this with torchrun or accelerate launch. NanoVLM uses one
-# process with multiple internal workers.
-
 PYTHON_BIN="${PYTHON_BIN:-python}"
 VISIBLE_DEVICES="${VISIBLE_DEVICES:-0,1,2,3,4,5,6,7}"
 WORKER_GPUS="${WORKER_GPUS:-0,1,2,3,4,5,6,7}"
@@ -16,7 +11,7 @@ BATCH_SIZE="${BATCH_SIZE:-1}"
 ATTN_IMPLEMENTATION="${ATTN_IMPLEMENTATION:-sdpa}"
 USE_CACHE="${USE_CACHE:-false}"
 VERBOSITY="${VERBOSITY:-INFO}"
-OUTPUT_PATH="${OUTPUT_PATH:-/home/ma-user/work/eval_outputs/nanovlm_mme_8npu_full}"
+OUTPUT_PATH="${OUTPUT_PATH:-/home/ma-user/work/output/nanovlm_mme_eval_ascend}"
 
 export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-${VISIBLE_DEVICES}}"
 export HF_HOME="${HF_HOME:-/home/ma-user/work/hf_cache}"

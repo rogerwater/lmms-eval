@@ -1,13 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Ascend/snt9b lmms-eval supplemental environment sync script.
-# Run this after lmms-engine/sync_ascend_nanovlm.sh in the same Python env.
-# This script intentionally does NOT install torch, torchvision, flash-attn,
-# triton, bitsandbytes, liger-kernel, or any nvidia-* CUDA wheels.
-
-# Use script-specific variables so ModelArts/global PIP_INDEX_URL does not
-# silently override the intended mirror.
 ASCEND_PIP_INDEX_URL="${ASCEND_PIP_INDEX_URL:-https://mirrors.aliyun.com/pypi/simple/}"
 ASCEND_PIP_TRUSTED_HOST="${ASCEND_PIP_TRUSTED_HOST:-mirrors.aliyun.com}"
 PYTHON_BIN="${PYTHON_BIN:-python}"
