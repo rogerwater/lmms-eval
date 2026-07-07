@@ -17,6 +17,7 @@ export ASCEND_RT_VISIBLE_DEVICES="${ASCEND_RT_VISIBLE_DEVICES:-${VISIBLE_DEVICES
 export HF_HOME="${HF_HOME:-/home/ma-user/work/hf_cache}"
 export HF_HUB_DISABLE_XET="${HF_HUB_DISABLE_XET:-1}"
 export HF_HUB_ENABLE_HF_TRANSFER="${HF_HUB_ENABLE_HF_TRANSFER:-0}"
+export API_TYPE="${API_TYPE:-dummy}"
 export TASK_QUEUE_ENABLE="${TASK_QUEUE_ENABLE:-2}"
 export HCCL_CONNECT_TIMEOUT="${HCCL_CONNECT_TIMEOUT:-7200}"
 export PYTORCH_NPU_ALLOC_CONF="${PYTORCH_NPU_ALLOC_CONF:-expandable_segments:True}"
@@ -48,6 +49,7 @@ echo "ASCEND_RT_VISIBLE_DEVICES: ${ASCEND_RT_VISIBLE_DEVICES}"
 echo "WORKER_COUNT: ${WORKER_COUNT}"
 echo "LAUNCH_MODE: single process with NanoVLM internal NPU workers"
 echo "HF_HOME: ${HF_HOME}"
+echo "API_TYPE: ${API_TYPE}"
 if [[ -n "${HF_ENDPOINT:-}" ]]; then
   echo "HF_ENDPOINT: ${HF_ENDPOINT}"
 fi
